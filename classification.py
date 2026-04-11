@@ -6,16 +6,12 @@ import os
 import numpy as np
 
 
-# Get path of current script
-base_path = os.path.dirname(os.path.abspath(__file__))
-
 # Create output folder inside project
-output_path = os.path.join(base_path, "output")
-
+output_path = "output"
 os.makedirs(output_path, exist_ok=True)
 
 # Load dataset
-titanic = pd.read_csv("data/titanic.csv")
+titanic = pd.read_csv("titanic.csv")
 
 # Inspect dataset
 print(titanic.head())
