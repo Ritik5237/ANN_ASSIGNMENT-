@@ -1,1 +1,1 @@
-Test Loss: 16.0930, Test MAE: 2.6900
+MAE: 2.6150
