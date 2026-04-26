@@ -153,101 +153,198 @@
 # model.save("output/ann_model.h5")
 
 
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import os
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
 
-# Create output folder
-output_path = "output"
-os.makedirs(output_path, exist_ok=True)
+# ==========================================
+# 1. Dataset Definition
+# ==========================================
+class TitanicDataset(Dataset):
+    """Custom PyTorch Dataset for Titanic data."""
+    def __init__(self, X, y):
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32).view(-1, 1)
 
-# ---------------- DATA PREPROCESSING ----------------
-titanic = pd.read_csv("data/titanic.csv")
+    def __len__(self):
+        return len(self.X)
 
-# Handle missing values
-titanic['age'] = titanic['age'].fillna(titanic['age'].mean())
-titanic['embarked'] = titanic['embarked'].fillna(titanic['embarked'].mode()[0])
-titanic.drop(['name', 'ticket', 'cabin', 'boat', 'body', 'home.dest'], axis=1, inplace=True)
-titanic = pd.get_dummies(titanic, drop_first=True)
+    def __getitem__(self, idx):
+        return self.X[idx], self.y[idx]
 
-X = titanic.drop('survived', axis=1).values.astype(np.float32)
-y = titanic['survived'].values.astype(np.float32)
-
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
-
-# Convert to Tensors
-X_train_t = torch.FloatTensor(X_train)
-y_train_t = torch.FloatTensor(y_train).view(-1, 1)
-X_test_t = torch.FloatTensor(X_test)
-y_test_t = torch.FloatTensor(y_test).view(-1, 1)
-
-# ---------------- PYTORCH MODEL ----------------
-class TitanicNet(nn.Module):
-    def __init__(self, input_dim):
-        super(TitanicNet, self).__init__()
+# ==========================================
+# 2. Model Architecture
+# ==========================================
+class TitanicNN(nn.Module):
+    """Neural Network for Binary Classification."""
+    def __init__(self, input_size):
+        super(TitanicNN, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 32),
+            nn.Linear(input_size, 32),
             nn.ReLU(),
             nn.Linear(32, 16),
             nn.ReLU(),
             nn.Linear(16, 8),
             nn.ReLU(),
-            nn.Linear(8, 1) # No Sigmoid here! Stability handled by Loss function
+            nn.Linear(8, 1) # Raw logits output
         )
+
     def forward(self, x):
         return self.net(x)
 
-model = TitanicNet(X_train.shape[1])
-criterion = nn.BCEWithLogitsLoss() # This handles sigmoid internally and stably
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# ==========================================
+# 3. Preprocessing & Visualization Logic
+# ==========================================
+def load_and_preprocess_titanic(filepath, output_dir):
+    print(f"--- Loading Titanic Dataset from {filepath} ---")
+    df = pd.read_csv(filepath)
 
-# Training Loop
-epochs = 50
-history = {'loss': [], 'accuracy': []}
+    # Handle missing values
+    df['age'] = df['age'].fillna(df['age'].mean())
+    df['embarked'] = df['embarked'].fillna(df['embarked'].mode()[0])
 
-for epoch in range(epochs):
-    model.train()
-    optimizer.zero_grad()
-    outputs = model(X_train_t)
-    loss = criterion(outputs, y_train_t)
-    loss.backward()
-    optimizer.step()
+    # Visualizations (from first code logic)
+    sns.countplot(x='survived', data=df)
+    plt.title("Survival Count")
+    plt.savefig(os.path.join(output_dir, "survival_count.png"))
+    plt.close()
+
+    # Drop non-numeric/unnecessary columns
+    cols_to_drop = ['name', 'ticket', 'cabin', 'boat', 'body', 'home.dest']
+    existing_drops = [c for c in cols_to_drop if c in df.columns]
+    df.drop(existing_drops, axis=1, inplace=True)
+
+    # Convert categorical to numerical
+    df = pd.get_dummies(df, drop_first=True)
+
+    # Split features and target
+    X = df.drop('survived', axis=1).values.astype(np.float32)
+    y = df['survived'].values.astype(np.float32)
+
+    # Split and Scale
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    return X_train, X_test, y_train, y_test, X.shape[1]
+
+# ==========================================
+# 4. Training Function
+# ==========================================
+def train_model(model, dataloader, criterion, optimizer, num_epochs=50):
+    print("\n--- Starting Training ---")
+    model.train()
+    history = {'loss': [], 'accuracy': []}
+
+    for epoch in range(num_epochs):
+        batch_losses = []
+        correct = 0
+        total = 0
+        
+        for batch_X, batch_y in dataloader:
+            optimizer.zero_grad()
+            outputs = model(batch_X)
+            loss = criterion(outputs, batch_y)
+            loss.backward()
+            optimizer.step()
+            
+            batch_losses.append(loss.item())
+            
+            # Accuracy calculation
+            probs = torch.sigmoid(outputs)
+            predicted = (probs > 0.5).float()
+            total += batch_y.size(0)
+            correct += (predicted == batch_y).sum().item()
+
+        avg_loss = sum(batch_losses) / len(batch_losses)
+        avg_acc = correct / total
+        history['loss'].append(avg_loss)
+        history['accuracy'].append(avg_acc)
+
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.4f}, Acc: {avg_acc:.4f}")
+
+    return history
+
+# ==========================================
+# 5. Evaluation Function
+# ==========================================
+def evaluate_model(model, X_test, y_test, output_dir):
+    print("\n--- Evaluation Results ---")
+    model.eval()
     with torch.no_grad():
-        # Manually apply sigmoid for accuracy calculation only
-        probs = torch.sigmoid(outputs)
-        predicted = (probs > 0.5).float()
-        acc = (predicted == y_train_t).sum() / y_train_t.shape[0]
-        history['loss'].append(loss.item())
-        history['accuracy'].append(acc.item())
+        X_tensor = torch.tensor(X_test, dtype=torch.float32)
+        logits = model(X_tensor)
+        probs = torch.sigmoid(logits)
+        y_pred = (probs > 0.5).float().numpy()
 
-# ---------------- EVALUATION & SAVING ----------------
-model.eval()
-with torch.no_grad():
-    raw_preds = model(X_test_t)
-    y_pred_probs = torch.sigmoid(raw_preds)
-    y_pred = (y_pred_probs > 0.5).float().numpy()
+    accuracy = accuracy_score(y_test, y_pred)
+    print(f"Final Test Accuracy: {accuracy*100:.2f}%")
+    
+    # Save Report
+    report = classification_report(y_test, y_pred)
+    with open(os.path.join(output_dir, "classification_report.txt"), "w") as f:
+        f.write(report)
 
-accuracy = (y_pred == y_test.reshape(-1, 1)).mean()
-print(f"Test Accuracy: {accuracy:.4f}")
+    # Confusion Matrix Visualization
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.title("Titanic Survival Confusion Matrix")
+    plt.savefig(os.path.join(output_dir, "confusion_matrix.png"))
+    plt.close()
 
-# Save Accuracy Plot
-plt.plot(history['accuracy'])
-plt.title("Model Accuracy")
-plt.savefig(f"{output_path}/accuracy_plot.png")
-plt.close()
+# ==========================================
+# 6. Main Flow
+# ==========================================
+def main():
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    data_path = "data/titanic.csv" 
+    
+    # 1. Preprocess
+    X_train, X_test, y_train, y_test, input_size = load_and_preprocess_titanic(data_path, output_dir)
 
-# Save Weights
-torch.save(model.state_dict(), f"{output_path}/titanic_model.pth")
+    # 2. DataLoaders
+    train_dataset = TitanicDataset(X_train, y_train)
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+
+    # 3. Model Setup
+    model = TitanicNN(input_size)
+    criterion = nn.BCEWithLogitsLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # 4. Training
+    history = train_model(model, train_loader, criterion, optimizer, num_epochs=50)
+
+    # 5. Evaluation
+    evaluate_model(model, X_test, y_test, output_dir)
+
+    # 6. Final Plots
+    plt.figure(figsize=(10, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history['loss'], label='Loss')
+    plt.title('Training Loss')
+    plt.subplot(1, 2, 2)
+    plt.plot(history['accuracy'], label='Accuracy', color='orange')
+    plt.title('Training Accuracy')
+    plt.savefig(os.path.join(output_dir, "training_history.png"))
+    plt.close()
+    
+    # Save Model Weights
+    torch.save(model.state_dict(), os.path.join(output_dir, "titanic_model.pth"))
+    print(f"\nTask complete. All artifacts saved in '{output_dir}'.")
+
+if __name__ == "__main__":
+    main()
