@@ -136,3 +136,95 @@ plt.title("Hyperparameter Comparison")
 plt.ylabel("MAE")
 plt.savefig(os.path.join(output_path, "comparison.png"))
 plt.close()
+
+# import pandas as pd
+# import os
+# import numpy as np
+# import matplotlib.pyplot as plt
+# import seaborn as sns
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# from sklearn.model_selection import train_test_split
+# from sklearn.preprocessing import StandardScaler
+
+# # SETUP
+# output_path = "outputRegression"
+# os.makedirs(output_path, exist_ok=True)
+
+# # LOAD DATA
+# house = pd.read_csv("data/house.csv").dropna()
+# X = house.drop('medv', axis=1).values.astype(np.float32)
+# y = house['medv'].values.astype(np.float32)
+
+# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# scaler = StandardScaler()
+# X_train = scaler.fit_transform(X_train)
+# X_test = scaler.transform(X_test)
+
+# # Convert to Tensors
+# X_train_t = torch.FloatTensor(X_train)
+# y_train_t = torch.FloatTensor(y_train).view(-1, 1)
+# X_test_t = torch.FloatTensor(X_test)
+# y_test_t = torch.FloatTensor(y_test).view(-1, 1)
+
+# # PYTORCH REGRESSION MODEL
+# class HouseNet(nn.Module):
+#     def __init__(self, input_dim, h1, h2):
+#         super(HouseNet, self).__init__()
+#         self.net = nn.Sequential(
+#             nn.Linear(input_dim, h1),
+#             nn.ReLU(),
+#             nn.Linear(h1, h2),
+#             nn.ReLU(),
+#             nn.Linear(h2, 1)
+#         )
+#     def forward(self, x):
+#         return self.net(x)
+
+# def train_pytorch_model(h1, h2, epochs, batch_size):
+#     model = HouseNet(X_train.shape[1], h1, h2)
+#     criterion = nn.MSELoss()
+#     optimizer = optim.Adam(model.parameters(), lr=0.001)
+    
+#     # Simple batching logic
+#     for epoch in range(epochs):
+#         model.train()
+#         permutation = torch.randperm(X_train_t.size(0))
+#         for i in range(0, X_train_t.size(0), batch_size):
+#             indices = permutation[i:i+batch_size]
+#             batch_x, batch_y = X_train_t[indices], y_train_t[indices]
+            
+#             optimizer.zero_grad()
+#             outputs = model(batch_x)
+#             loss = criterion(outputs, batch_y)
+#             loss.backward()
+#             optimizer.step()
+            
+#     model.eval()
+#     with torch.no_grad():
+#         preds = model(X_test_t)
+#         mae = torch.abs(preds - y_test_t).mean()
+#     return model, mae.item()
+
+# # EXPERIMENTS
+# _, mae1 = train_pytorch_model(16, 8, 50, 32)
+# model, mae2 = train_pytorch_model(32, 16, 50, 32) # Best Model Choice
+# _, mae3 = train_pytorch_model(32, 16, 100, 32)
+# _, mae4 = train_pytorch_model(32, 16, 50, 16)
+
+# # SAVE FINAL PREDICTIONS
+# y_pred = model(X_test_t).detach().numpy()
+# pred_df = pd.DataFrame({"Actual": y_test, "Predicted": y_pred.flatten()})
+# pred_df.to_csv(os.path.join(output_path, "predictions.csv"), index=False)
+
+# # PLOT Actual vs Predicted
+# plt.scatter(y_test, y_pred)
+# plt.xlabel("Actual")
+# plt.ylabel("Predicted")
+# plt.savefig(os.path.join(output_path, "actual_vs_predicted.png"))
+# plt.close()
+
+# print(f"Final MAE: {mae2:.4f}")
+# torch.save(model.state_dict(), "outputRegression/house_model.pth")
